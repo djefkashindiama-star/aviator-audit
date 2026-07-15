@@ -1,8 +1,13 @@
 # Relais local Aviator
 
-Cette extension Chrome lit uniquement le premier multiplicateur terminé dans
-l'historique SPRIBE (`.payouts-block`). Elle n'accède pas au mot de passe, au
-solde, aux mises, au chat ou aux cookies PremierBet.
+Cette extension Chrome lit uniquement l'identifiant et le multiplicateur final
+de chaque manche dans l'historique Aviator. Elle prend en charge l'interface
+actuelle `aviator.studio` et l'ancien historique DOM SPRIBE. Elle n'accède pas au
+mot de passe, au solde, aux mises, au chat ou aux cookies PremierBet.
+
+Les manches sont mises en file dans le stockage local de l'extension, puis
+transmises au point d'ingestion Render. La file est réessayée automatiquement
+après une coupure réseau et le serveur déduplique les identifiants de manche.
 
 ## Installation
 

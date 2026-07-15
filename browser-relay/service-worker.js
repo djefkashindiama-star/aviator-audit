@@ -125,16 +125,24 @@ async function flushQueue() {
   }
 }
 
-chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "INGEST_ROUND" && message.round) enqueue(message.round);
-  if (message?.type === "RELAY_PAGE_READY") {
-    sendHeartbeat(message.stage, message.frameHost);
-  }
-  if (message?.type === "RELAY_FRAME_READY") {
-    setBadge("ON", "#57d69b", "Aviator détecté, attente de la prochaine manche");
-    updateState({ status: "watching", frameHost: message.frameHost });
-    sendHeartbeat("history-detected", message.frameHost);
-  }
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  (async () => {
+    if (message?.type === "INGEST_ROUND" && message.round) {
+      await enqueue(message.round);
+    } else if (message?.type === "RELAY_PAGE_READY") {
+      await sendHeartbeat(message.stage, message.frameHost);
+    } else if (message?.type === "RELAY_FRAME_READY") {
+      setBadge("ON", "#57d69b", "Aviator détecté, attente de la prochaine manche");
+      await updateState({ status: "watching", frameHost: message.frameHost });
+      await sendHeartbeat("history-detected", message.frameHost);
+    }
+    sendResponse({ ok: true });
+  })().catch(async (error) => {
+    await updateState({ status: "error", lastError: String(error) });
+    sendResponse({ ok: false });
+  });
+  // Garde le service worker actif jusqu'à la fin de l'envoi vers Render.
+  return true;
 });
 
 chrome.runtime.onInstalled.addListener(() => {

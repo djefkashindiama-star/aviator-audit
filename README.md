@@ -7,7 +7,7 @@ leur indépendance. Il **ne promet pas de prédire la prochaine manche** et ne p
 aucun pari.
 
 Le dossier `browser-relay` contient une extension Chrome en lecture seule. Elle
-s'exécute dans l'iframe SPRIBE déjà authentifiée sur l'ordinateur de l'utilisateur
+s'exécute dans l'iframe Aviator déjà authentifiée sur l'ordinateur de l'utilisateur
 et transmet uniquement chaque multiplicateur terminé vers Render. La campagne
 de 20 jours démarre à la première manche reçue, pas au déploiement.
 Le lanceur macOS `launch_aviator_relay.command` ouvre automatiquement un profil
@@ -42,7 +42,7 @@ Les erreurs, tentatives, taux de succès et dates de dernière lecture restent
 Le catalogue public identifie Aviator avec l'identifiant `291195`, le fournisseur
 `36`, et indique `isFunModeAvailable: false`. L'application PremierBet demande
 ensuite `GET /cd/v1/casino/game/291195/launch-url`; cet endpoint répond
-`401 Unauthorized` sans session PremierBet authentifiée. Le flux SPRIBE et
+`401 Unauthorized` sans session PremierBet authentifiée. Le flux du fournisseur et
 l'historique des manches ne sont donc jamais chargés pour un visiteur public.
 
 Le service déployé sonde ces deux endpoints toutes les cinq minutes et expose le

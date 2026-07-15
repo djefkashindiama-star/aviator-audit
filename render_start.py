@@ -243,8 +243,8 @@ def source_probe_snapshot(
             }
         stage_messages = {
             "extension-started": "Extension chargée; attente de la page PremierBet.",
-            "premierbet-page": "Page PremierBet détectée; attente de l'iframe SPRIBE.",
-            "provider-frame": "Iframe SPRIBE détectée; attente de l'historique des manches.",
+            "premierbet-page": "Page PremierBet détectée; attente de l'iframe Aviator.",
+            "provider-frame": "Iframe Aviator détectée; attente de l'historique des manches.",
             "history-detected": "Historique Aviator détecté; attente de la prochaine manche.",
         }
         return {

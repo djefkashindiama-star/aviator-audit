@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Aviator Audit Relay",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Transmet uniquement les multiplicateurs terminés d'Aviator vers le tableau de bord d'audit.",
   "permissions": ["alarms", "storage"],
   "host_permissions": [
     "https://aviator-audit.onrender.com/*",
     "https://www.premierbet.com/*",
+    "https://*.aviator.studio/*",
     "https://*.spribegaming.com/*",
     "https://*.spribe.io/*"
   ],
@@ -17,12 +18,20 @@
     {
       "matches": [
         "https://www.premierbet.com/*",
+        "https://*.aviator.studio/*",
         "https://*.spribegaming.com/*",
         "https://*.spribe.io/*"
       ],
-      "js": ["content.js"],
+      "js": ["config.js", "content.js"],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": ["https://*.aviator.studio/*"],
+      "js": ["page-probe.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "world": "MAIN"
     }
   ],
   "action": {

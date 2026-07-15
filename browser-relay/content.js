@@ -2,6 +2,8 @@
   "use strict";
 
   const TAG = "[Aviator Audit Relay]";
+  const QUEUE_KEY = "aviatorRelayQueue";
+  const STATE_KEY = "aviatorRelayState";
   const MULTIPLIER = /^(\d{1,6}(?:[.,]\d{1,2})?)\s*[x×]$/i;
   const BLOCK_SELECTORS = [
     ".payouts-block",
@@ -19,11 +21,169 @@
   let lastSignature = null;
   let lastFirstNode = null;
   let processingTimer = null;
+  let providerHistoryIds = null;
+  let directFlushing = false;
 
-  chrome.runtime.sendMessage({
-    type: "RELAY_PAGE_READY",
-    frameHost: location.hostname,
-    stage: location.hostname.includes("premierbet.com") ? "premierbet-page" : "provider-frame"
+  async function storageGet(keys) {
+    return await chrome.storage.local.get(keys);
+  }
+
+  async function updateState(patch) {
+    const stored = await storageGet(STATE_KEY);
+    await chrome.storage.local.set({
+      [STATE_KEY]: { ...(stored[STATE_KEY] || {}), ...patch }
+    });
+  }
+
+  async function ensureCollectorId() {
+    const stored = await storageGet("aviatorCollectorId");
+    if (stored.aviatorCollectorId) return stored.aviatorCollectorId;
+    const id = globalThis.crypto.randomUUID();
+    await chrome.storage.local.set({ aviatorCollectorId: id });
+    return id;
+  }
+
+  function relayConfig() {
+    const config = globalThis.AVIATOR_RELAY_CONFIG;
+    return config?.endpoint && config?.token && !config.token.includes("REMPLACER") ? config : null;
+  }
+
+  async function sendHeartbeat(stage) {
+    const config = relayConfig();
+    if (!config) return;
+    const endpoint = config.endpoint.replace(/\/api\/ingest$/, "/api/relay-heartbeat");
+    try {
+      await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${config.token}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ stage, frame_host: location.hostname })
+      });
+    } catch (_) {
+      // La page reste active et réessaiera avec les prochains événements.
+    }
+  }
+
+  async function flushDirectQueue() {
+    if (directFlushing) return;
+    const config = relayConfig();
+    if (!config) {
+      await updateState({ status: "configuration-missing" });
+      return;
+    }
+    directFlushing = true;
+    try {
+      const collectorId = await ensureCollectorId();
+      const stored = await storageGet(QUEUE_KEY);
+      const queue = Array.isArray(stored[QUEUE_KEY]) ? stored[QUEUE_KEY] : [];
+      while (queue.length) {
+        let response;
+        try {
+          response = await fetch(config.endpoint, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${config.token}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ ...queue[0], collector_id: collectorId })
+          });
+        } catch (error) {
+          await updateState({ status: "offline", lastError: String(error), queued: queue.length });
+          return;
+        }
+        if (response.status === 401) {
+          await updateState({ status: "unauthorized", queued: queue.length });
+          return;
+        }
+        if (response.status === 410) {
+          queue.shift();
+          await chrome.storage.local.set({ [QUEUE_KEY]: queue });
+          await updateState({ status: "completed", queued: queue.length });
+          return;
+        }
+        if (!response.ok) {
+          await updateState({ status: "error", lastError: `HTTP ${response.status}`, queued: queue.length });
+          return;
+        }
+        const result = await response.json();
+        const sent = queue.shift();
+        await chrome.storage.local.set({ [QUEUE_KEY]: queue });
+        await updateState({
+          status: "active",
+          queued: queue.length,
+          rounds: result.rounds,
+          campaignEndsAt: result.ends_at_utc,
+          lastSuccessAt: new Date().toISOString(),
+          lastMultiplier: sent.multiplier,
+          lastError: null
+        });
+      }
+    } finally {
+      directFlushing = false;
+    }
+  }
+
+  async function enqueueRound(round) {
+    const stored = await storageGet(QUEUE_KEY);
+    const queue = Array.isArray(stored[QUEUE_KEY]) ? stored[QUEUE_KEY] : [];
+    if (!queue.some((item) => item.round_id === round.round_id)) queue.push(round);
+    await chrome.storage.local.set({ [QUEUE_KEY]: queue.slice(-500) });
+    await updateState({ queued: queue.length, lastDetectedAt: new Date().toISOString() });
+    await flushDirectQueue();
+  }
+
+  sendHeartbeat(location.hostname.includes("premierbet.com") ? "premierbet-page" : "provider-frame");
+
+  function sendRound(roundId, multiplier, historySize) {
+    enqueueRound({
+      round_id: `pb-${roundId}`,
+      multiplier,
+      observed_at_utc: new Date().toISOString(),
+      frame_host: location.hostname,
+      history_size: historySize
+    });
+  }
+
+  function acceptProviderHistory(rawItems) {
+    if (!location.hostname.endsWith(".aviator.studio")) return;
+    const items = Array.isArray(rawItems)
+      ? rawItems
+          .map((item) => ({
+            id: String(item?.id || ""),
+            multiplier: Number(item?.multiplier)
+          }))
+          .filter(
+            (item) =>
+              /^[a-f0-9]{12,64}$/i.test(item.id) &&
+              Number.isFinite(item.multiplier) &&
+              item.multiplier >= 1 &&
+              item.multiplier <= 1000000
+          )
+          .slice(0, 100)
+      : [];
+    if (items.length < 2) return;
+
+    if (providerHistoryIds === null) {
+      providerHistoryIds = new Set(items.map((item) => item.id));
+      updateState({ status: "watching", frameHost: location.hostname });
+      sendHeartbeat("history-detected");
+      return;
+    }
+
+    const fresh = [];
+    for (const item of items) {
+      if (providerHistoryIds.has(item.id)) break;
+      fresh.push(item);
+    }
+    providerHistoryIds = new Set(items.map((item) => item.id));
+    fresh.reverse().forEach((item) => sendRound(item.id, item.multiplier, items.length));
+  }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.source !== "aviator-audit-probe") return;
+    acceptProviderHistory(event.data.history);
   });
 
   function parseMultiplier(text) {
@@ -59,9 +219,9 @@
 
   function makeRoundId() {
     if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
-      return `pb-${globalThis.crypto.randomUUID()}`;
+      return globalThis.crypto.randomUUID();
     }
-    return `pb-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 14)}`;
   }
 
   function emitLatest() {
@@ -90,16 +250,7 @@
     lastFirstNode = current.items[0];
     if (!firstNodeChanged && !signatureChanged) return;
 
-    chrome.runtime.sendMessage({
-      type: "INGEST_ROUND",
-      round: {
-        round_id: makeRoundId(),
-        multiplier: current.values[0],
-        observed_at_utc: new Date().toISOString(),
-        frame_host: location.hostname,
-        history_size: current.values.length
-      }
-    });
+    sendRound(makeRoundId(), current.values[0], current.values.length);
   }
 
   function scheduleRead() {
@@ -135,4 +286,5 @@
   });
   discovery.observe(document.documentElement, { childList: true, subtree: true });
   setInterval(findHistory, 5000);
+  setInterval(flushDirectQueue, 15000);
 })();
