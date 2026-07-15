@@ -6,6 +6,12 @@ solde, aux mises, au chat ou aux cookies PremierBet.
 
 ## Installation
 
+Sur macOS, double-cliquer sur `launch_aviator_relay.command` à la racine du
+projet ouvre un profil Chrome dédié avec l'extension et la bonne page. Il suffit
+alors de se connecter à PremierBet dans cette fenêtre et de laisser Aviator ouvert.
+
+Installation manuelle alternative :
+
 1. Copier `config.example.js` vers `config.js` et y placer le secret configuré
    dans `AVIATOR_INGEST_TOKEN` sur Render.
 2. Ouvrir `chrome://extensions`, activer **Mode développeur**, puis choisir

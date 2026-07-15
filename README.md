@@ -10,6 +10,8 @@ Le dossier `browser-relay` contient une extension Chrome en lecture seule. Elle
 s'exécute dans l'iframe SPRIBE déjà authentifiée sur l'ordinateur de l'utilisateur
 et transmet uniquement chaque multiplicateur terminé vers Render. La campagne
 de 20 jours démarre à la première manche reçue, pas au déploiement.
+Le lanceur macOS `launch_aviator_relay.command` ouvre automatiquement un profil
+Chrome dédié avec cette extension.
 
 ## Interface locale React
 
