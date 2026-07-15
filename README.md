@@ -6,6 +6,11 @@ Ce projet collecte des résultats historiques afin d'étudier leur distribution 
 leur indépendance. Il **ne promet pas de prédire la prochaine manche** et ne place
 aucun pari.
 
+Le dossier `browser-relay` contient une extension Chrome en lecture seule. Elle
+s'exécute dans l'iframe SPRIBE déjà authentifiée sur l'ordinateur de l'utilisateur
+et transmet uniquement chaque multiplicateur terminé vers Render. La campagne
+de 20 jours démarre à la première manche reçue, pas au déploiement.
+
 ## Interface locale React
 
 Le tableau de bord affiche automatiquement la base SQLite, les dernières manches,
@@ -72,7 +77,7 @@ python3 aviator_audit.py --db aviator.sqlite3 collect --config config.json --onc
 python3 aviator_audit.py --db aviator.sqlite3 collect --config config.json --duration-days 20
 ```
 
-Pour une collecte de dix jours, laissez le second processus tourner dans un
+Pour une collecte de vingt jours, laissez le second processus tourner dans un
 terminal dédié. Le programme reprend sans dupliquer les manches après une coupure
 et ralentit automatiquement en cas d'erreurs répétées.
 
@@ -112,6 +117,11 @@ le disque persistant `/var/data`.
 Le Blueprint utilise un service **Starter** avec un disque persistant de 1 Go.
 Cette configuration évite la mise en veille de l'offre gratuite et permet à la
 campagne de reprendre avec sa date de fin d'origine après un redémarrage.
+
+Pour le relais local, `AVIATOR_INGEST_TOKEN` doit contenir un secret aléatoire
+conservé uniquement dans Render et dans `browser-relay/config.js`. L'endpoint
+`POST /api/ingest` refuse les requêtes sans ce secret, valide strictement les
+valeurs et déduplique les reprises réseau par identifiant de manche.
 
 La source ne doit jamais être inscrite dans Git. Ajoutez dans les variables
 d'environnement Render l'une de ces deux configurations :

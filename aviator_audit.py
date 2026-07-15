@@ -15,6 +15,7 @@ import http.server
 import json
 import math
 import os
+import re
 import sqlite3
 import statistics
 import sys
@@ -27,6 +28,8 @@ from typing import Any, Iterable
 
 
 UTC = dt.timezone.utc
+PREMIERBET_RELAY_SOURCE = "premierbet-cd-aviator-291195"
+RELAY_ROUND_ID = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 
 
 def utc_now() -> str:
@@ -201,6 +204,100 @@ def open_campaign(
     )
     connection.commit()
     return int(cursor.lastrowid), deadline
+
+
+def ingest_relay_round(
+    db_path: Path,
+    payload: dict[str, Any],
+    duration_days: float = 20,
+    source: str = PREMIERBET_RELAY_SOURCE,
+) -> dict[str, Any]:
+    """Valide et archive une manche envoyée par l'extension locale.
+
+    La campagne démarre à la première manche réelle et ne redémarre pas
+    automatiquement après son échéance.
+    """
+    if duration_days <= 0:
+        raise ValueError("duration_days doit être positif")
+    if not isinstance(payload, dict):
+        raise TypeError("Le corps JSON doit être un objet")
+
+    round_id = str(payload.get("round_id", "")).strip()
+    if not RELAY_ROUND_ID.fullmatch(round_id):
+        raise ValueError("round_id invalide")
+    multiplier = float(payload.get("multiplier"))
+    if not math.isfinite(multiplier) or not 1 <= multiplier <= 1_000_000:
+        raise ValueError("multiplicateur invalide")
+
+    occurred = payload.get("observed_at_utc")
+    if occurred:
+        occurred_at = parse_utc(str(occurred))
+        if abs((dt.datetime.now(UTC) - occurred_at).total_seconds()) > 86_400:
+            raise ValueError("horodatage hors fenêtre autorisée")
+        occurred = occurred_at.isoformat(timespec="milliseconds")
+    else:
+        occurred = utc_now()
+
+    sanitized = {
+        "round_id": round_id,
+        "multiplier": multiplier,
+        "observed_at_utc": occurred,
+        "collector_id": str(payload.get("collector_id", ""))[:80],
+        "frame_host": str(payload.get("frame_host", ""))[:200],
+        "history_size": int(payload.get("history_size", 0)),
+    }
+    connection = connect(db_path)
+    latest = connection.execute(
+        """
+        SELECT id, status, ends_at_utc FROM campaigns
+        WHERE source=? ORDER BY id DESC LIMIT 1
+        """,
+        (source,),
+    ).fetchone()
+    now = dt.datetime.now(UTC)
+    if latest is None:
+        campaign_id, deadline = open_campaign(connection, source, duration_days)
+    else:
+        campaign_id, status, raw_deadline = int(latest[0]), str(latest[1]), latest[2]
+        deadline = parse_utc(raw_deadline)
+        if status != "running":
+            return {
+                "accepted": False,
+                "campaign_id": campaign_id,
+                "campaign_status": status,
+                "ends_at_utc": deadline.isoformat(),
+            }
+        if deadline <= now:
+            connection.execute(
+                "UPDATE campaigns SET status='completed', completed_at_utc=? WHERE id=?",
+                (utc_now(), campaign_id),
+            )
+            connection.commit()
+            return {
+                "accepted": False,
+                "campaign_id": campaign_id,
+                "campaign_status": "completed",
+                "ends_at_utc": deadline.isoformat(),
+            }
+
+    raw = json.dumps(sanitized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    added = insert_rows(
+        connection,
+        source,
+        [(round_id, str(occurred), multiplier, raw)],
+    )
+    archive_response(connection, campaign_id, sanitized, rows_seen=1, rows_added=added)
+    total = connection.execute(
+        "SELECT COUNT(*) FROM rounds WHERE source=?", (source,)
+    ).fetchone()[0]
+    return {
+        "accepted": True,
+        "added": bool(added),
+        "rounds": int(total),
+        "campaign_id": campaign_id,
+        "campaign_status": "running",
+        "ends_at_utc": deadline.isoformat(),
+    }
 
 
 def archive_response(

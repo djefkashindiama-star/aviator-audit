@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import http.server
+import hmac
 import json
 import os
 import signal
@@ -199,13 +200,53 @@ def refresh_premierbet_probe() -> None:
         SOURCE_PROBE.update(result)
 
 
-def source_probe_snapshot(source_configured: bool) -> dict[str, Any]:
+def source_probe_snapshot(
+    source_configured: bool,
+    relay_configured: bool = False,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
     if source_configured:
         return {
             "operator": os.environ.get("AVIATOR_SOURCE_NAME", "Source configurée"),
             "status": "collector-configured",
             "collection_ready": True,
             "message": "Le collecteur dispose d'une source configurée.",
+            "checked_at": aviator_audit.utc_now(),
+        }
+    if relay_configured and db_path is not None:
+        connection = aviator_audit.connect(db_path)
+        campaign = connection.execute(
+            """
+            SELECT id, status, started_at_utc, ends_at_utc, last_success_at_utc
+            FROM campaigns WHERE source=? ORDER BY id DESC LIMIT 1
+            """,
+            (aviator_audit.PREMIERBET_RELAY_SOURCE,),
+        ).fetchone()
+        if campaign:
+            return {
+                "operator": "PremierBet CD",
+                "game_id": PREMIERBET_GAME_ID,
+                "status": "relay-running" if campaign[1] == "running" else "relay-completed",
+                "collection_ready": campaign[1] == "running",
+                "message": (
+                    "Le relais local envoie les manches réelles vers Render."
+                    if campaign[1] == "running"
+                    else "La campagne de collecte par relais est terminée."
+                ),
+                "campaign_id": campaign[0],
+                "started_at": campaign[2],
+                "ends_at": campaign[3],
+                "checked_at": campaign[4] or aviator_audit.utc_now(),
+            }
+        return {
+            "operator": "PremierBet CD",
+            "game_id": PREMIERBET_GAME_ID,
+            "status": "relay-ready",
+            "collection_ready": True,
+            "message": (
+                "Relais sécurisé prêt; la campagne de 20 jours démarrera "
+                "à la première manche reçue."
+            ),
             "checked_at": aviator_audit.utc_now(),
         }
     with SOURCE_PROBE_LOCK:
@@ -233,12 +274,19 @@ def wait_for_frontend(process: subprocess.Popen[bytes], timeout: float = 90) -> 
     raise RuntimeError("Le serveur web n'a pas démarré à temps.")
 
 
-def send_json(handler: http.server.BaseHTTPRequestHandler, payload: Any, status: int = 200) -> None:
+def send_json(
+    handler: http.server.BaseHTTPRequestHandler,
+    payload: Any,
+    status: int = 200,
+    cors: bool = False,
+) -> None:
     body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
+    if cors:
+        handler.send_header("Access-Control-Allow-Origin", "*")
     handler.end_headers()
     if handler.command != "HEAD":
         handler.wfile.write(body)
@@ -249,24 +297,70 @@ def make_handler(
     frontend: subprocess.Popen[bytes],
     collector: subprocess.Popen[bytes] | None,
     source_configured: bool,
+    relay_configured: bool,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_HEAD(self) -> None:  # noqa: N802
             self.do_GET()
+
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            route = self.path.split("?", 1)[0].rstrip("/")
+            if route != "/api/ingest":
+                self.send_error(404)
+                return
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+            self.send_header("Access-Control-Max-Age", "86400")
+            self.end_headers()
+
+        def do_POST(self) -> None:  # noqa: N802
+            route = self.path.split("?", 1)[0].rstrip("/")
+            if route != "/api/ingest":
+                send_json(self, {"error": "Route inconnue"}, 404, cors=True)
+                return
+            expected = os.environ.get("AVIATOR_INGEST_TOKEN", "").strip()
+            if not expected:
+                send_json(self, {"error": "Relais non configuré"}, 503, cors=True)
+                return
+            authorization = self.headers.get("Authorization", "")
+            supplied = authorization[7:] if authorization.startswith("Bearer ") else ""
+            if not supplied or not hmac.compare_digest(supplied, expected):
+                send_json(self, {"error": "Non autorisé"}, 401, cors=True)
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length", "0"))
+                if not 1 <= content_length <= 8192:
+                    raise ValueError("Taille de requête invalide")
+                payload = json.loads(self.rfile.read(content_length))
+                result = aviator_audit.ingest_relay_round(
+                    db_path,
+                    payload,
+                    duration_days=float(os.environ.get("AVIATOR_DURATION_DAYS", "20")),
+                )
+                send_json(self, result, 200 if result["accepted"] else 410, cors=True)
+            except (ValueError, TypeError, json.JSONDecodeError) as error:
+                send_json(self, {"error": str(error)[:300]}, 400, cors=True)
 
         def do_GET(self) -> None:  # noqa: N802
             route = self.path.split("?", 1)[0].rstrip("/")
             if route == "/health":
                 frontend_ok = frontend.poll() is None
                 collector_code = collector.poll() if collector else None
-                collector_ok = not source_configured or collector_code in (None, 0)
+                collector_ok = relay_configured or not source_configured or collector_code in (None, 0)
+                source = source_probe_snapshot(
+                    source_configured, relay_configured, db_path
+                )
                 send_json(
                     self,
                     {
                         "status": "ok" if frontend_ok and collector_ok else "error",
                         "frontend": "running" if frontend_ok else "stopped",
                         "collector": (
-                            "blocked-source"
+                            source["status"]
+                            if relay_configured
+                            else "blocked-source"
                             if not source_configured
                             else "running"
                             if collector_code is None
@@ -278,7 +372,7 @@ def make_handler(
                             "AVIATOR_DEPLOYMENT_MODE", "render"
                         ),
                         "database": str(db_path),
-                        "source": source_probe_snapshot(source_configured),
+                        "source": source,
                         "time": aviator_audit.utc_now(),
                     },
                     200 if frontend_ok and collector_ok else 503,
@@ -286,7 +380,9 @@ def make_handler(
                 return
             if route == "/api/dashboard":
                 payload = aviator_audit.dashboard_payload(db_path, STARTED_AT)
-                payload["source"] = source_probe_snapshot(source_configured)
+                payload["source"] = source_probe_snapshot(
+                    source_configured, relay_configured, db_path
+                )
                 send_json(self, payload)
                 return
             self.proxy_frontend()
@@ -342,7 +438,8 @@ def main() -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     aviator_audit.connect(db_path).close()
     config_path = collector_config()
-    if config_path is None:
+    relay_configured = bool(os.environ.get("AVIATOR_INGEST_TOKEN", "").strip())
+    if config_path is None and not relay_configured:
         threading.Thread(target=source_probe_loop, daemon=True).start()
 
     frontend = subprocess.Popen(
@@ -371,11 +468,19 @@ def main() -> None:
                 cwd=ROOT,
             )
             print("Collecteur Render démarré pour une campagne de 20 jours.", flush=True)
+        elif relay_configured:
+            print("Relais local sécurisé prêt pour la campagne de 20 jours.", flush=True)
         else:
             print("Source non configurée: interface en ligne, collecte en attente.", flush=True)
 
         port = int(os.environ.get("PORT", "10000"))
-        handler = make_handler(db_path, frontend, collector, config_path is not None)
+        handler = make_handler(
+            db_path,
+            frontend,
+            collector,
+            config_path is not None,
+            relay_configured,
+        )
         server = http.server.ThreadingHTTPServer(("0.0.0.0", port), handler)
 
         def shutdown(_signal: int, _frame: Any) -> None:

@@ -16,6 +16,8 @@ services:
         value: render-starter
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: AVIATOR_INGEST_TOKEN
+        sync: false
     disk:
       name: aviator-data
       mountPath: /var/data

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Aviator Audit Relay</title>
+    <style>
+      body{width:290px;margin:0;padding:18px;background:#0b0e12;color:#f2f0ea;font:13px Arial,sans-serif}h1{font-size:16px;margin:0 0 14px}.status{padding:11px;background:#151a20;border-left:3px solid #ffb547;margin-bottom:14px}.status.active,.status.watching{border-color:#57d69b}.status.error,.status.offline,.status.unauthorized{border-color:#ff4a3d}.grid{display:grid;grid-template-columns:1fr auto;gap:8px;color:#8b949e}.grid strong{color:#f2f0ea}a{display:block;margin-top:16px;color:#ffb547;text-decoration:none}small{display:block;color:#69727b;margin-top:12px;line-height:1.4}
+    </style>
+  </head>
+  <body>
+    <h1>Aviator Audit Relay</h1>
+    <div id="status" class="status">Initialisation…</div>
+    <div class="grid">
+      <span>Manches envoyées</span><strong id="rounds">—</strong>
+      <span>En attente</span><strong id="queued">0</strong>
+      <span>Dernier multiplicateur</span><strong id="last">—</strong>
+      <span>Fin de campagne</span><strong id="ends">—</strong>
+    </div>
+    <a href="https://aviator-audit.onrender.com" target="_blank">Ouvrir le tableau de bord ↗</a>
+    <small>Lecture seule : aucun mot de passe, solde, mise ou cookie n’est transmis.</small>
+    <script src="popup.js"></script>
+  </body>
+</html>

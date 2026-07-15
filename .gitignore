@@ -11,3 +11,4 @@ dashboard/dist/
 dashboard/.vinext/
 dashboard/.wrangler/
 dashboard/.git.starter-backup/
+browser-relay/config.js

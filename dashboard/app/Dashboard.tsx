@@ -98,8 +98,14 @@ export default function Dashboard() {
   const signal = data?.evaluations.length
     ? Math.max(...data.evaluations.map((item) => item.improvement))
     : null;
-  const sourceBlocked = Boolean(data?.source && !data.source.collection_ready && data.source.status !== "checking");
+  const sourceBlocked = Boolean(
+    data?.source
+    && !data.source.collection_ready
+    && data.source.status !== "checking"
+    && !data.source.status.startsWith("relay-")
+  );
   const authenticationRequired = data?.source?.status === "authentication-required";
+  const relayReady = data?.source?.status === "relay-ready";
 
   return (
     <main className="shell">
@@ -147,6 +153,13 @@ export default function Dashboard() {
         <section className="notice notice--blocked">
           <strong>{authenticationRequired ? "Collecte bloquée par l’authentification PremierBet." : "Source inaccessible depuis Render."}</strong>
           <span>{data.source.message} Aucune manche fictive ni donnée d’un autre opérateur n’est injectée.</span>
+        </section>
+      )}
+
+      {relayReady && (
+        <section className="notice notice--ready">
+          <strong>Relais local prêt.</strong>
+          <span>{data.source.message}</span>
         </section>
       )}
 
