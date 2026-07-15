@@ -17,6 +17,12 @@ type DashboardData = {
   evaluations: { threshold: number; test_rounds: number; baseline_accuracy: number; lag_state_accuracy: number; improvement: number }[];
   hourly: { hour: string; count: number }[];
   latest: { round_id: string; timestamp: string; multiplier: number; source: string }[];
+  source: {
+    operator: string; game_id?: string; status: string; collection_ready: boolean;
+    catalog_available?: boolean; game_available?: boolean; fun_mode_available?: boolean | null;
+    launch_requires_authentication?: boolean | null; display_name?: string; provider?: string;
+    message: string; checked_at: string | null;
+  };
   campaign: null | {
     id: number; source: string; status: "running" | "completed" | "stopped";
     duration_days: number; started_at: string; ends_at: string; completed_at: string | null;
@@ -92,6 +98,7 @@ export default function Dashboard() {
   const signal = data?.evaluations.length
     ? Math.max(...data.evaluations.map((item) => item.improvement))
     : null;
+  const sourceBlocked = data?.source?.status === "authentication-required";
 
   return (
     <main className="shell">
@@ -101,8 +108,8 @@ export default function Dashboard() {
           <div><p className="eyebrow">Observatoire continu</p><h1>Aviator Audit</h1></div>
         </div>
         <div className="top-actions">
-          <div className={`connection ${error ? "connection--off" : ""}`}>
-            <span className="pulse" />{error ? "API hors ligne" : "API connectée"}
+          <div className={`connection ${error || sourceBlocked ? "connection--off" : ""}`}>
+            <span className="pulse" />{error ? "API hors ligne" : sourceBlocked ? "Source bloquée" : "API connectée"}
           </div>
           <button className="quiet-button" onClick={() => setPaused((value) => !value)}>{paused ? "Reprendre" : "Pause auto"}</button>
           <button className="primary-button" onClick={refresh}>Actualiser</button>
@@ -116,7 +123,7 @@ export default function Dashboard() {
           <p className="hero-copy">Les indicateurs comparent les résultats observés à une référence théorique et testent tout signal sur les manches suivantes — jamais sur celles utilisées pour l’inventer.</p>
         </div>
         <div className="hero-status">
-          <div className="orb"><span>{data?.rounds ? "LIVE" : "WAIT"}</span></div>
+          <div className="orb"><span>{data?.rounds ? "LIVE" : sourceBlocked ? "AUTH" : "WAIT"}</span></div>
           <div><small>Dernière observation</small><strong>{formatDate(data?.last_round_at ?? null)}</strong><span>Rafraîchi {lastRefresh ? lastRefresh.toLocaleTimeString("fr-FR") : "—"}</span></div>
         </div>
       </section>
@@ -135,11 +142,18 @@ export default function Dashboard() {
         </section>
       )}
 
+      {sourceBlocked && (
+        <section className="notice notice--blocked">
+          <strong>Collecte bloquée par PremierBet.</strong>
+          <span>{data.source.message} Le mode gratuit est désactivé pour le jeu 291195 ; aucune manche fictive n’est injectée.</span>
+        </section>
+      )}
+
       <section className="campaign-strip" aria-label="Campagne de collecte sur 20 jours">
         <div className="campaign-title">
           <p className="eyebrow">Campagne exhaustive</p>
-          <h3>{data?.campaign ? `Collecte #${data.campaign.id} · ${formatNumber(data.campaign.duration_days, 1)} jours` : "Collecte de 20 jours prête"}</h3>
-          <span>{data?.campaign ? `${formatDate(data.campaign.started_at)} → ${formatDate(data.campaign.ends_at)}` : "Elle démarrera automatiquement dès que la source réelle sera configurée."}</span>
+          <h3>{data?.campaign ? `Collecte #${data.campaign.id} · ${formatNumber(data.campaign.duration_days, 1)} jours` : sourceBlocked ? "Collecte non démarrée — authentification requise" : "Collecte de 20 jours en attente"}</h3>
+          <span>{data?.campaign ? `${formatDate(data.campaign.started_at)} → ${formatDate(data.campaign.ends_at)}` : sourceBlocked ? `Sonde: ${data.source.display_name ?? "Aviator"} · ${data.source.provider ?? "provider 36"} · ${formatDate(data.source.checked_at)}` : "Vérification de la source réelle en cours."}</span>
         </div>
         <div className="campaign-progress">
           <div className="progress-label"><span>Progression temporelle</span><strong>{formatNumber((data?.campaign?.progress ?? 0) * 100, 2)}%</strong></div>

@@ -30,12 +30,18 @@ normalisées et la réponse JSON complète compressée, avec son empreinte SHA-2
 Les erreurs, tentatives, taux de succès et dates de dernière lecture restent
 également enregistrés dans SQLite et visibles dans l'interface.
 
-## Ce qui manque avant la collecte réelle
+## État vérifié de la source PremierBet
 
-La page Premier Bet charge Aviator dans une intégration SPRIBE. L'URL publique du
-catalogue ne contient pas directement l'historique des manches. Il faut donc
-identifier, dans les outils réseau du navigateur, une réponse JSON ou un flux
-WebSocket qui affiche légalement l'historique visible par l'utilisateur.
+Le catalogue public identifie Aviator avec l'identifiant `291195`, le fournisseur
+`36`, et indique `isFunModeAvailable: false`. L'application PremierBet demande
+ensuite `GET /cd/v1/casino/game/291195/launch-url`; cet endpoint répond
+`401 Unauthorized` sans session PremierBet authentifiée. Le flux SPRIBE et
+l'historique des manches ne sont donc jamais chargés pour un visiteur public.
+
+Le service déployé sonde ces deux endpoints toutes les cinq minutes et expose le
+diagnostic dans `/health` et dans le tableau de bord. La campagne de 20 jours ne
+démarre qu'à la première source réelle autorisée; il n'injecte pas de valeurs
+aléatoires ou de données d'un autre opérateur.
 
 Ne contournez pas de connexion, CAPTCHA, limitation de débit ou protection du
 site. Vérifiez les conditions d'utilisation et n'enregistrez jamais de cookie ou

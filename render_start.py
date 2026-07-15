@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,17 @@ import aviator_audit
 ROOT = Path(__file__).resolve().parent
 FRONTEND_PORT = 3001
 STARTED_AT = time.time()
+PREMIERBET_GAME_ID = "291195"
+PREMIERBET_API = "https://gaming-api.premierbet.com/cd/v1"
+SOURCE_PROBE_LOCK = threading.Lock()
+SOURCE_PROBE: dict[str, Any] = {
+    "operator": "PremierBet CD",
+    "game_id": PREMIERBET_GAME_ID,
+    "status": "checking",
+    "collection_ready": False,
+    "message": "Vérification de la source PremierBet en cours.",
+    "checked_at": None,
+}
 HOP_BY_HOP_HEADERS = {
     "connection",
     "keep-alive",
@@ -77,6 +89,122 @@ def collector_config() -> Path | None:
     return path
 
 
+def _public_request(url: str) -> urllib.request.Request:
+    return urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Origin": "https://www.premierbet.com",
+            "Referer": "https://www.premierbet.com/cd/casino/game/aviator-291195",
+            "User-Agent": "Mozilla/5.0 Aviator-Audit-Source-Probe/1.0",
+        },
+    )
+
+
+def refresh_premierbet_probe() -> None:
+    """Vérifie les endpoints publics sans cookie ni contournement de connexion."""
+    query = urllib.parse.urlencode(
+        {
+            "country": "CD",
+            "group": "g5",
+            "platform": "desktop",
+            "locale": "fr",
+            "query": "aviator",
+        }
+    )
+    catalog_url = f"{PREMIERBET_API}/casino/games/search?{query}"
+    launch_query = urllib.parse.urlencode(
+        {
+            "country": "CD",
+            "group": "g5",
+            "platform": "desktop",
+            "locale": "fr",
+            "lobbyUrl": "https://www.premierbet.com/cd/casino",
+        }
+    )
+    launch_url = (
+        f"{PREMIERBET_API}/casino/game/{PREMIERBET_GAME_ID}/launch-url?{launch_query}"
+    )
+    result: dict[str, Any] = {
+        "operator": "PremierBet CD",
+        "game_id": PREMIERBET_GAME_ID,
+        "status": "unavailable",
+        "collection_ready": False,
+        "catalog_available": False,
+        "game_available": False,
+        "fun_mode_available": None,
+        "launch_requires_authentication": None,
+        "message": "La source PremierBet n'est pas joignable pour le moment.",
+        "checked_at": aviator_audit.utc_now(),
+    }
+    try:
+        with urllib.request.urlopen(_public_request(catalog_url), timeout=15) as response:
+            payload = json.load(response)
+        games = payload.get("data", {}).get("games", [])
+        game = next(
+            (item for item in games if str(item.get("id")) == PREMIERBET_GAME_ID),
+            None,
+        )
+        result["catalog_available"] = True
+        result["game_available"] = game is not None
+        if game:
+            result["display_name"] = game.get("displayName")
+            result["provider"] = game.get("providerDisplayName")
+            result["fun_mode_available"] = bool(game.get("isFunModeAvailable"))
+
+        try:
+            with urllib.request.urlopen(_public_request(launch_url), timeout=15) as response:
+                response.read(1)
+            result.update(
+                {
+                    "status": "launch-accessible",
+                    "launch_requires_authentication": False,
+                    "message": (
+                        "L'URL de lancement est accessible, mais aucun flux de manches "
+                        "n'est encore configuré dans le collecteur."
+                    ),
+                }
+            )
+        except urllib.error.HTTPError as error:
+            if error.code == 401:
+                result.update(
+                    {
+                        "status": "authentication-required",
+                        "launch_requires_authentication": True,
+                        "message": (
+                            "Aviator est disponible, mais PremierBet refuse le lancement "
+                            "sans une session de jeu authentifiée (HTTP 401)."
+                        ),
+                    }
+                )
+            else:
+                result["message"] = f"Le lancement PremierBet répond HTTP {error.code}."
+    except (OSError, ValueError, TypeError, urllib.error.URLError) as error:
+        result["message"] = f"Sonde PremierBet en échec: {str(error)[:300]}"
+    with SOURCE_PROBE_LOCK:
+        SOURCE_PROBE.clear()
+        SOURCE_PROBE.update(result)
+
+
+def source_probe_snapshot(source_configured: bool) -> dict[str, Any]:
+    if source_configured:
+        return {
+            "operator": os.environ.get("AVIATOR_SOURCE_NAME", "Source configurée"),
+            "status": "collector-configured",
+            "collection_ready": True,
+            "message": "Le collecteur dispose d'une source configurée.",
+            "checked_at": aviator_audit.utc_now(),
+        }
+    with SOURCE_PROBE_LOCK:
+        return dict(SOURCE_PROBE)
+
+
+def source_probe_loop() -> None:
+    while True:
+        refresh_premierbet_probe()
+        time.sleep(300)
+
+
 def wait_for_frontend(process: subprocess.Popen[bytes], timeout: float = 90) -> None:
     deadline = time.time() + timeout
     url = f"http://127.0.0.1:{FRONTEND_PORT}/"
@@ -125,7 +253,7 @@ def make_handler(
                         "status": "ok" if frontend_ok and collector_ok else "error",
                         "frontend": "running" if frontend_ok else "stopped",
                         "collector": (
-                            "not-configured"
+                            "blocked-authentication"
                             if not source_configured
                             else "running"
                             if collector_code is None
@@ -137,13 +265,16 @@ def make_handler(
                             "AVIATOR_DEPLOYMENT_MODE", "render"
                         ),
                         "database": str(db_path),
+                        "source": source_probe_snapshot(source_configured),
                         "time": aviator_audit.utc_now(),
                     },
                     200 if frontend_ok and collector_ok else 503,
                 )
                 return
             if route == "/api/dashboard":
-                send_json(self, aviator_audit.dashboard_payload(db_path, STARTED_AT))
+                payload = aviator_audit.dashboard_payload(db_path, STARTED_AT)
+                payload["source"] = source_probe_snapshot(source_configured)
+                send_json(self, payload)
                 return
             self.proxy_frontend()
 
@@ -198,6 +329,8 @@ def main() -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     aviator_audit.connect(db_path).close()
     config_path = collector_config()
+    if config_path is None:
+        threading.Thread(target=source_probe_loop, daemon=True).start()
 
     frontend = subprocess.Popen(
         ["npm", "run", "start", "--", "--host", "127.0.0.1", "--port", str(FRONTEND_PORT)],
