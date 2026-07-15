@@ -93,8 +93,54 @@ def connect(path: Path) -> sqlite3.Connection:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_raw_campaign_time ON raw_responses(campaign_id, observed_at_utc)"
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS relay_status (
+            id INTEGER PRIMARY KEY CHECK(id = 1),
+            stage TEXT NOT NULL,
+            frame_host TEXT,
+            updated_at_utc TEXT NOT NULL
+        )
+        """
+    )
     connection.commit()
     return connection
+
+
+def record_relay_status(db_path: Path, stage: str, frame_host: str = "") -> dict[str, str]:
+    allowed = {"extension-started", "premierbet-page", "provider-frame", "history-detected"}
+    if stage not in allowed:
+        raise ValueError("stage de relais invalide")
+    host = str(frame_host)[:200]
+    if host and not re.fullmatch(r"[A-Za-z0-9.-]+", host):
+        raise ValueError("frame_host invalide")
+    updated = utc_now()
+    connection = connect(db_path)
+    connection.execute(
+        """
+        INSERT INTO relay_status(id, stage, frame_host, updated_at_utc)
+        VALUES (1, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            stage=excluded.stage,
+            frame_host=excluded.frame_host,
+            updated_at_utc=excluded.updated_at_utc
+        """,
+        (stage, host or None, updated),
+    )
+    connection.commit()
+    connection.close()
+    return {"stage": stage, "frame_host": host, "updated_at_utc": updated}
+
+
+def relay_status(db_path: Path) -> dict[str, Any] | None:
+    connection = connect(db_path)
+    row = connection.execute(
+        "SELECT stage, frame_host, updated_at_utc FROM relay_status WHERE id=1"
+    ).fetchone()
+    connection.close()
+    if not row:
+        return None
+    return {"stage": row[0], "frame_host": row[1], "updated_at_utc": row[2]}
 
 
 def get_path(value: Any, path: str) -> Any:

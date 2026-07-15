@@ -30,6 +30,24 @@ async function updateState(patch) {
   await chrome.storage.local.set({ [STATE_KEY]: state });
 }
 
+async function sendHeartbeat(stage, frameHost = "") {
+  const config = globalThis.AVIATOR_RELAY_CONFIG;
+  if (!config?.endpoint || !config?.token) return;
+  const endpoint = config.endpoint.replace(/\/api\/ingest$/, "/api/relay-heartbeat");
+  try {
+    await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${config.token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ stage, frame_host: frameHost })
+    });
+  } catch (_) {
+    // La file des manches reste le mécanisme de reprise principal.
+  }
+}
+
 async function enqueue(round) {
   const stored = await storageGet(QUEUE_KEY);
   const queue = Array.isArray(stored[QUEUE_KEY]) ? stored[QUEUE_KEY] : [];
@@ -109,9 +127,13 @@ async function flushQueue() {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "INGEST_ROUND" && message.round) enqueue(message.round);
+  if (message?.type === "RELAY_PAGE_READY") {
+    sendHeartbeat(message.stage, message.frameHost);
+  }
   if (message?.type === "RELAY_FRAME_READY") {
     setBadge("ON", "#57d69b", "Aviator détecté, attente de la prochaine manche");
     updateState({ status: "watching", frameHost: message.frameHost });
+    sendHeartbeat("history-detected", message.frameHost);
   }
 });
 
@@ -127,3 +149,4 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "flushAviatorQueue") flushQueue();
 });
 flushQueue();
+sendHeartbeat("extension-started");

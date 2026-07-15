@@ -214,6 +214,7 @@ def source_probe_snapshot(
             "checked_at": aviator_audit.utc_now(),
         }
     if relay_configured and db_path is not None:
+        relay = aviator_audit.relay_status(db_path)
         connection = aviator_audit.connect(db_path)
         campaign = connection.execute(
             """
@@ -222,6 +223,7 @@ def source_probe_snapshot(
             """,
             (aviator_audit.PREMIERBET_RELAY_SOURCE,),
         ).fetchone()
+        connection.close()
         if campaign:
             return {
                 "operator": "PremierBet CD",
@@ -237,17 +239,25 @@ def source_probe_snapshot(
                 "started_at": campaign[2],
                 "ends_at": campaign[3],
                 "checked_at": campaign[4] or aviator_audit.utc_now(),
+                "relay": relay,
             }
+        stage_messages = {
+            "extension-started": "Extension chargée; attente de la page PremierBet.",
+            "premierbet-page": "Page PremierBet détectée; attente de l'iframe SPRIBE.",
+            "provider-frame": "Iframe SPRIBE détectée; attente de l'historique des manches.",
+            "history-detected": "Historique Aviator détecté; attente de la prochaine manche.",
+        }
         return {
             "operator": "PremierBet CD",
             "game_id": PREMIERBET_GAME_ID,
             "status": "relay-ready",
             "collection_ready": True,
-            "message": (
-                "Relais sécurisé prêt; la campagne de 20 jours démarrera "
-                "à la première manche reçue."
+            "message": stage_messages.get(
+                relay["stage"] if relay else "",
+                "Relais sécurisé prêt; attente du navigateur local.",
             ),
-            "checked_at": aviator_audit.utc_now(),
+            "checked_at": relay["updated_at_utc"] if relay else aviator_audit.utc_now(),
+            "relay": relay,
         }
     with SOURCE_PROBE_LOCK:
         return dict(SOURCE_PROBE)
@@ -305,7 +315,7 @@ def make_handler(
 
         def do_OPTIONS(self) -> None:  # noqa: N802
             route = self.path.split("?", 1)[0].rstrip("/")
-            if route != "/api/ingest":
+            if route not in {"/api/ingest", "/api/relay-heartbeat"}:
                 self.send_error(404)
                 return
             self.send_response(204)
@@ -317,7 +327,7 @@ def make_handler(
 
         def do_POST(self) -> None:  # noqa: N802
             route = self.path.split("?", 1)[0].rstrip("/")
-            if route != "/api/ingest":
+            if route not in {"/api/ingest", "/api/relay-heartbeat"}:
                 send_json(self, {"error": "Route inconnue"}, 404, cors=True)
                 return
             expected = os.environ.get("AVIATOR_INGEST_TOKEN", "").strip()
@@ -334,6 +344,14 @@ def make_handler(
                 if not 1 <= content_length <= 8192:
                     raise ValueError("Taille de requête invalide")
                 payload = json.loads(self.rfile.read(content_length))
+                if route == "/api/relay-heartbeat":
+                    result = aviator_audit.record_relay_status(
+                        db_path,
+                        str(payload.get("stage", "")),
+                        str(payload.get("frame_host", "")),
+                    )
+                    send_json(self, result, 200, cors=True)
+                    return
                 result = aviator_audit.ingest_relay_round(
                     db_path,
                     payload,

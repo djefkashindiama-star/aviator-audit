@@ -11,9 +11,13 @@ if [[ ! -f "$EXTENSION/config.js" ]]; then
   exit 1
 fi
 
+CFT="$HOME/.aviator-audit-runtime/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+if [[ -x "$CFT" ]]; then
+  CHROME="$CFT"
+fi
 if [[ ! -x "$CHROME" ]]; then
-  print -u2 "Google Chrome n'est pas installé dans /Applications."
+  print -u2 "Aucun navigateur Chrome compatible n'est installé."
   exit 1
 fi
 

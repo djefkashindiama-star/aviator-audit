@@ -20,6 +20,12 @@
   let lastFirstNode = null;
   let processingTimer = null;
 
+  chrome.runtime.sendMessage({
+    type: "RELAY_PAGE_READY",
+    frameHost: location.hostname,
+    stage: location.hostname.includes("premierbet.com") ? "premierbet-page" : "provider-frame"
+  });
+
   function parseMultiplier(text) {
     const match = String(text || "").trim().match(MULTIPLIER);
     if (!match) return null;

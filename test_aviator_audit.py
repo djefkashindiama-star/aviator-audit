@@ -171,6 +171,17 @@ class AuditTests(unittest.TestCase):
                 server.server_close()
                 thread.join(timeout=2)
 
+    def test_relay_status_records_only_safe_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "relay.sqlite3"
+            saved = audit.record_relay_status(
+                db, "history-detected", "aviator-next.spribegaming.com"
+            )
+            self.assertEqual(saved["stage"], "history-detected")
+            self.assertEqual(audit.relay_status(db)["frame_host"], saved["frame_host"])
+            with self.assertRaises(ValueError):
+                audit.record_relay_status(db, "history-detected", "host/path?token=secret")
+
 
 if __name__ == "__main__":
     unittest.main()

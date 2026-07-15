@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Aviator Audit Relay",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Transmet uniquement les multiplicateurs terminés d'Aviator vers le tableau de bord d'audit.",
   "permissions": ["alarms", "storage"],
   "host_permissions": [
