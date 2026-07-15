@@ -43,6 +43,11 @@ diagnostic dans `/health` et dans le tableau de bord. La campagne de 20 jours ne
 démarre qu'à la première source réelle autorisée; il n'injecte pas de valeurs
 aléatoires ou de données d'un autre opérateur.
 
+Depuis le service Render actuel, Cloudflare renvoie en plus `403 Forbidden` sur
+le catalogue de jeu alors que le même endpoint public répond depuis une connexion
+locale. Le tableau de bord distingue ce blocage réseau de l'authentification
+`401` observée localement sur l'URL de lancement.
+
 Ne contournez pas de connexion, CAPTCHA, limitation de débit ou protection du
 site. Vérifiez les conditions d'utilisation et n'enregistrez jamais de cookie ou
 mot de passe dans `config.json`.

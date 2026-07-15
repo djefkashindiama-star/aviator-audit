@@ -179,6 +179,19 @@ def refresh_premierbet_probe() -> None:
                 )
             else:
                 result["message"] = f"Le lancement PremierBet répond HTTP {error.code}."
+    except urllib.error.HTTPError as error:
+        if error.code == 403:
+            result.update(
+                {
+                    "status": "hosting-network-blocked",
+                    "message": (
+                        "PremierBet/Cloudflare refuse l'adresse réseau de cet "
+                        "hébergement avant même le lancement du jeu (HTTP 403)."
+                    ),
+                }
+            )
+        else:
+            result["message"] = f"Le catalogue PremierBet répond HTTP {error.code}."
     except (OSError, ValueError, TypeError, urllib.error.URLError) as error:
         result["message"] = f"Sonde PremierBet en échec: {str(error)[:300]}"
     with SOURCE_PROBE_LOCK:
@@ -253,7 +266,7 @@ def make_handler(
                         "status": "ok" if frontend_ok and collector_ok else "error",
                         "frontend": "running" if frontend_ok else "stopped",
                         "collector": (
-                            "blocked-authentication"
+                            "blocked-source"
                             if not source_configured
                             else "running"
                             if collector_code is None

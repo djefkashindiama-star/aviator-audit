@@ -98,7 +98,8 @@ export default function Dashboard() {
   const signal = data?.evaluations.length
     ? Math.max(...data.evaluations.map((item) => item.improvement))
     : null;
-  const sourceBlocked = data?.source?.status === "authentication-required";
+  const sourceBlocked = Boolean(data?.source && !data.source.collection_ready && data.source.status !== "checking");
+  const authenticationRequired = data?.source?.status === "authentication-required";
 
   return (
     <main className="shell">
@@ -144,15 +145,15 @@ export default function Dashboard() {
 
       {sourceBlocked && (
         <section className="notice notice--blocked">
-          <strong>Collecte bloquée par PremierBet.</strong>
-          <span>{data.source.message} Le mode gratuit est désactivé pour le jeu 291195 ; aucune manche fictive n’est injectée.</span>
+          <strong>{authenticationRequired ? "Collecte bloquée par l’authentification PremierBet." : "Source inaccessible depuis Render."}</strong>
+          <span>{data.source.message} Aucune manche fictive ni donnée d’un autre opérateur n’est injectée.</span>
         </section>
       )}
 
       <section className="campaign-strip" aria-label="Campagne de collecte sur 20 jours">
         <div className="campaign-title">
           <p className="eyebrow">Campagne exhaustive</p>
-          <h3>{data?.campaign ? `Collecte #${data.campaign.id} · ${formatNumber(data.campaign.duration_days, 1)} jours` : sourceBlocked ? "Collecte non démarrée — authentification requise" : "Collecte de 20 jours en attente"}</h3>
+          <h3>{data?.campaign ? `Collecte #${data.campaign.id} · ${formatNumber(data.campaign.duration_days, 1)} jours` : authenticationRequired ? "Collecte non démarrée — authentification requise" : sourceBlocked ? "Collecte non démarrée — source refusée" : "Collecte de 20 jours en attente"}</h3>
           <span>{data?.campaign ? `${formatDate(data.campaign.started_at)} → ${formatDate(data.campaign.ends_at)}` : sourceBlocked ? `Sonde: ${data.source.display_name ?? "Aviator"} · ${data.source.provider ?? "provider 36"} · ${formatDate(data.source.checked_at)}` : "Vérification de la source réelle en cours."}</span>
         </div>
         <div className="campaign-progress">
