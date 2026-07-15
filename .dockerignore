@@ -1,0 +1,16 @@
+.git
+.DS_Store
+__pycache__
+*.pyc
+*.sqlite3
+*.sqlite3-*
+*.pid
+config.json
+report.json
+dashboard/.git
+dashboard/.git.starter-backup
+dashboard/node_modules
+dashboard/dist
+dashboard/.vinext
+dashboard/.wrangler
+dashboard/.next

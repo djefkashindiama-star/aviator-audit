@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: aviator-audit
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: AVIATOR_DATA_DIR
+        value: /var/data
+      - key: AVIATOR_DURATION_DAYS
+        value: "20"
+      - key: AVIATOR_DEPLOYMENT_MODE
+        value: render-starter
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    disk:
+      name: aviator-data
+      mountPath: /var/data
+      sizeGB: 1

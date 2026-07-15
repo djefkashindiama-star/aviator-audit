@@ -1,0 +1,12 @@
+{
+  "source": "source-publique-autorisee",
+  "url": "https://example.com/api/public/history",
+  "poll_interval_seconds": 5,
+  "timeout_seconds": 20,
+  "items_path": "data.rounds",
+  "round_id_path": "id",
+  "timestamp_path": "created_at",
+  "multiplier_path": "multiplier",
+  "headers": {},
+  "headers_from_env": {}
+}
