@@ -28,6 +28,8 @@ exec "$CHROME" \
   --disable-background-timer-throttling \
   --disable-backgrounding-occluded-windows \
   --disable-renderer-backgrounding \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9223 \
   --no-first-run \
   --no-default-browser-check \
   "$TARGET"

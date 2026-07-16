@@ -13,6 +13,14 @@ de 20 jours démarre à la première manche reçue, pas au déploiement.
 Le lanceur macOS `launch_aviator_relay.command` ouvre automatiquement un profil
 Chrome dédié avec cette extension.
 
+Sur la machine de collecte, `relay_watchdog.py` peut être installé comme agent
+macOS permanent. Il maintient Chrome et la prévention de mise en veille actifs,
+contrôle Render toutes les 30 secondes, rouvre la page après cinq minutes sans
+nouvelle manche puis redémarre le profil dédié si le blocage persiste. La file
+locale de l'extension et la date de fin de campagne sont conservées. Le relais ne
+stocke aucun identifiant PremierBet : une session expirée doit donc toujours être
+reconnectée par son propriétaire.
+
 ## Interface locale React
 
 Le tableau de bord affiche automatiquement la base SQLite, les dernières manches,
