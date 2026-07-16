@@ -182,6 +182,34 @@ class AuditTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 audit.record_relay_status(db, "history-detected", "host/path?token=secret")
 
+    def test_relay_source_reports_stale_collection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "relay.sqlite3"
+            audit.ingest_relay_round(
+                db,
+                {
+                    "round_id": "pb-stale-test-0001",
+                    "multiplier": 1.75,
+                    "observed_at_utc": audit.utc_now(),
+                },
+            )
+            stale_at = (
+                audit.dt.datetime.now(audit.UTC) - audit.dt.timedelta(minutes=10)
+            ).isoformat()
+            connection = audit.connect(db)
+            connection.execute(
+                "UPDATE campaigns SET last_success_at_utc=?",
+                (stale_at,),
+            )
+            connection.commit()
+            connection.close()
+            snapshot = render_start.source_probe_snapshot(
+                False, relay_configured=True, db_path=db
+            )
+            self.assertEqual(snapshot["status"], "relay-stalled")
+            self.assertFalse(snapshot["collection_ready"])
+            self.assertGreater(snapshot["stale_seconds"], 300)
+
 
 if __name__ == "__main__":
     unittest.main()

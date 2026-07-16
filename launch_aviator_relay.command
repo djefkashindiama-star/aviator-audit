@@ -25,6 +25,9 @@ mkdir -p "$PROFILE"
 exec "$CHROME" \
   --user-data-dir="$PROFILE" \
   --load-extension="$EXTENSION" \
+  --disable-background-timer-throttling \
+  --disable-backgrounding-occluded-windows \
+  --disable-renderer-backgrounding \
   --no-first-run \
   --no-default-browser-check \
   "$TARGET"

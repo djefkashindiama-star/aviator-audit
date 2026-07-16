@@ -27,6 +27,7 @@ FRONTEND_PORT = 3001
 STARTED_AT = time.time()
 PREMIERBET_GAME_ID = "291195"
 PREMIERBET_API = "https://gaming-api.premierbet.com/cd/v1"
+RELAY_STALE_SECONDS = float(os.environ.get("AVIATOR_RELAY_STALE_SECONDS", "300"))
 SOURCE_PROBE_LOCK = threading.Lock()
 SOURCE_PROBE: dict[str, Any] = {
     "operator": "PremierBet CD",
@@ -225,20 +226,42 @@ def source_probe_snapshot(
         ).fetchone()
         connection.close()
         if campaign:
+            is_running = campaign[1] == "running"
+            stale_seconds = None
+            if is_running and campaign[4]:
+                stale_seconds = max(
+                    0.0,
+                    time.time() - aviator_audit.parse_utc(campaign[4]).timestamp(),
+                )
+            is_stale = (
+                is_running
+                and stale_seconds is not None
+                and stale_seconds > RELAY_STALE_SECONDS
+            )
             return {
                 "operator": "PremierBet CD",
                 "game_id": PREMIERBET_GAME_ID,
-                "status": "relay-running" if campaign[1] == "running" else "relay-completed",
-                "collection_ready": campaign[1] == "running",
+                "status": (
+                    "relay-stalled"
+                    if is_stale
+                    else "relay-running"
+                    if is_running
+                    else "relay-completed"
+                ),
+                "collection_ready": is_running and not is_stale,
                 "message": (
+                    "Le relais ne reçoit plus de nouvelle manche; vérifiez la session Aviator."
+                    if is_stale
+                    else
                     "Le relais local envoie les manches réelles vers Render."
-                    if campaign[1] == "running"
+                    if is_running
                     else "La campagne de collecte par relais est terminée."
                 ),
                 "campaign_id": campaign[0],
                 "started_at": campaign[2],
                 "ends_at": campaign[3],
                 "checked_at": campaign[4] or aviator_audit.utc_now(),
+                "stale_seconds": round(stale_seconds, 1) if stale_seconds is not None else None,
                 "relay": relay,
             }
         stage_messages = {
