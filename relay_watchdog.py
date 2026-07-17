@@ -30,6 +30,7 @@ BROWSER_LOG = RUNTIME / "browser.log"
 CHECK_SECONDS = int(os.getenv("AVIATOR_WATCHDOG_CHECK_SECONDS", "30"))
 STALE_SECONDS = int(os.getenv("AVIATOR_WATCHDOG_STALE_SECONDS", "300"))
 RECOVERY_COOLDOWN = int(os.getenv("AVIATOR_WATCHDOG_RECOVERY_COOLDOWN", "300"))
+AUTH_RETRY_SECONDS = int(os.getenv("AVIATOR_WATCHDOG_AUTH_RETRY_SECONDS", "1800"))
 
 STOP = False
 
@@ -205,6 +206,10 @@ def open_fresh_game() -> None:
 
 def stop_browser(pid: int, timeout: float = 12) -> None:
     try:
+        process_group = os.getpgid(pid)
+    except ProcessLookupError:
+        return
+    try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         return
@@ -216,11 +221,28 @@ def stop_browser(pid: int, timeout: float = 12) -> None:
             log(f"browser-stopped pid={pid}")
             return
         time.sleep(0.5)
-    log(f"browser-stop-timeout pid={pid}")
+    try:
+        os.killpg(process_group, signal.SIGKILL)
+        log(f"browser-force-stopped pid={pid}")
+    except ProcessLookupError:
+        pass
 
 
 def latest_round_age(payload: dict[str, Any], now: dt.datetime | None = None) -> float | None:
     return seconds_since(payload.get("last_round_at"), now)
+
+
+def authentication_suspected(
+    payload: dict[str, Any], now: dt.datetime | None = None
+) -> bool:
+    relay = payload.get("source", {}).get("relay") or {}
+    stage = relay.get("stage")
+    heartbeat_age = seconds_since(relay.get("updated_at_utc"), now)
+    return bool(
+        stage in {"premierbet-page", "provider-missing"}
+        and heartbeat_age is not None
+        and heartbeat_age <= 180
+    )
 
 
 def handle_signal(_signum: int, _frame: Any) -> None:
@@ -238,7 +260,8 @@ def run() -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    last_recovery = 0.0
+    # Give an existing or newly launched page time to initialize before recovery.
+    last_recovery = time.monotonic()
     recovery_count = 0
     try:
         while not STOP:
@@ -274,13 +297,32 @@ def run() -> None:
                 status["last_round_at"] = dashboard.get("last_round_at")
                 status["last_round_age_seconds"] = round(age, 1) if age is not None else None
                 status["render"] = "fresh" if age is not None and age <= STALE_SECONDS else "stale"
+                auth_suspected = status["render"] == "stale" and authentication_suspected(
+                    dashboard
+                )
+                if auth_suspected:
+                    status["render"] = "authentication-required"
             except Exception as error:
                 age = None
+                auth_suspected = False
                 status["render"] = "unreachable"
                 status["render_error"] = type(error).__name__
 
-            due = time.monotonic() - last_recovery >= RECOVERY_COOLDOWN
-            if pid is not None and status["render"] == "stale" and due:
+            recovery_delay = AUTH_RETRY_SECONDS if auth_suspected else RECOVERY_COOLDOWN
+            due = time.monotonic() - last_recovery >= recovery_delay
+            if pid is not None and auth_suspected and due:
+                recovery_count += 1
+                status["recovery_count"] = recovery_count
+                try:
+                    open_fresh_game()
+                    status["last_recovery"] = "authentication-page-reopened"
+                    log(f"recovery-authentication-page count={recovery_count}")
+                except Exception as error:
+                    status["last_recovery"] = "failed"
+                    status["recovery_error"] = type(error).__name__
+                    log(f"recovery-authentication-error type={type(error).__name__}")
+                last_recovery = time.monotonic()
+            elif pid is not None and status["render"] == "stale" and due:
                 recovery_count += 1
                 status["recovery_count"] = recovery_count
                 try:

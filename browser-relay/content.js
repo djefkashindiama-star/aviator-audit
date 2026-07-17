@@ -134,7 +134,24 @@
     await flushDirectQueue();
   }
 
-  sendHeartbeat(location.hostname.includes("premierbet.com") ? "premierbet-page" : "provider-frame");
+  const isPremierBetPage = location.hostname.includes("premierbet.com");
+  sendHeartbeat(isPremierBetPage ? "premierbet-page" : "provider-frame");
+
+  function providerFramePresent() {
+    return Array.from(document.querySelectorAll("iframe")).some((frame) => {
+      const source = String(frame.getAttribute("src") || "");
+      return /(?:aviator\.studio|spribegaming\.com|spribe\.io)/i.test(source);
+    });
+  }
+
+  if (isPremierBetPage && window.top === window) {
+    setInterval(
+      () => sendHeartbeat(providerFramePresent() ? "provider-frame" : "provider-missing"),
+      60000
+    );
+  } else if (!isPremierBetPage) {
+    setInterval(() => sendHeartbeat("provider-frame"), 60000);
+  }
 
   function sendRound(roundId, multiplier, historySize) {
     enqueueRound({

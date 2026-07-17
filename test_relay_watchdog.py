@@ -16,6 +16,20 @@ class RelayWatchdogTests(unittest.TestCase):
     def test_latest_round_age_handles_missing_timestamp(self):
         self.assertIsNone(watchdog.latest_round_age({"rounds": 0}))
 
+    def test_authentication_suspected_from_recent_page_heartbeat(self):
+        now = dt.datetime(2026, 7, 17, 13, 0, tzinfo=watchdog.UTC)
+        payload = {
+            "source": {
+                "relay": {
+                    "stage": "provider-missing",
+                    "updated_at_utc": "2026-07-17T12:59:00Z",
+                }
+            }
+        }
+        self.assertTrue(watchdog.authentication_suspected(payload, now))
+        payload["source"]["relay"]["updated_at_utc"] = "2026-07-17T12:50:00Z"
+        self.assertFalse(watchdog.authentication_suspected(payload, now))
+
     def test_game_target_matches_only_the_expected_page(self):
         self.assertTrue(
             watchdog.is_game_target(

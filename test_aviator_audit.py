@@ -210,6 +210,34 @@ class AuditTests(unittest.TestCase):
             self.assertFalse(snapshot["collection_ready"])
             self.assertGreater(snapshot["stale_seconds"], 300)
 
+    def test_relay_source_reports_authentication_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "relay.sqlite3"
+            audit.ingest_relay_round(
+                db,
+                {
+                    "round_id": "pb-auth-test-0001",
+                    "multiplier": 1.25,
+                    "observed_at_utc": audit.utc_now(),
+                },
+            )
+            stale_at = (
+                audit.dt.datetime.now(audit.UTC) - audit.dt.timedelta(minutes=10)
+            ).isoformat()
+            connection = audit.connect(db)
+            connection.execute(
+                "UPDATE campaigns SET last_success_at_utc=?",
+                (stale_at,),
+            )
+            connection.commit()
+            connection.close()
+            audit.record_relay_status(db, "provider-missing", "www.premierbet.com")
+            snapshot = render_start.source_probe_snapshot(
+                False, relay_configured=True, db_path=db
+            )
+            self.assertEqual(snapshot["status"], "authentication-required")
+            self.assertFalse(snapshot["collection_ready"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -108,7 +108,13 @@ def connect(path: Path) -> sqlite3.Connection:
 
 
 def record_relay_status(db_path: Path, stage: str, frame_host: str = "") -> dict[str, str]:
-    allowed = {"extension-started", "premierbet-page", "provider-frame", "history-detected"}
+    allowed = {
+        "extension-started",
+        "premierbet-page",
+        "provider-missing",
+        "provider-frame",
+        "history-detected",
+    }
     if stage not in allowed:
         raise ValueError("stage de relais invalide")
     host = str(frame_host)[:200]

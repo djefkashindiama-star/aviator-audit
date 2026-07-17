@@ -238,11 +238,27 @@ def source_probe_snapshot(
                 and stale_seconds is not None
                 and stale_seconds > RELAY_STALE_SECONDS
             )
+            relay_age = None
+            if relay and relay.get("updated_at_utc"):
+                relay_age = max(
+                    0.0,
+                    time.time()
+                    - aviator_audit.parse_utc(relay["updated_at_utc"]).timestamp(),
+                )
+            authentication_required = bool(
+                is_stale
+                and relay
+                and relay.get("stage") in {"premierbet-page", "provider-missing"}
+                and relay_age is not None
+                and relay_age <= 180
+            )
             return {
                 "operator": "PremierBet CD",
                 "game_id": PREMIERBET_GAME_ID,
                 "status": (
-                    "relay-stalled"
+                    "authentication-required"
+                    if authentication_required
+                    else "relay-stalled"
                     if is_stale
                     else "relay-running"
                     if is_running
@@ -250,7 +266,9 @@ def source_probe_snapshot(
                 ),
                 "collection_ready": is_running and not is_stale,
                 "message": (
-                    "Le relais ne reçoit plus de nouvelle manche; vérifiez la session Aviator."
+                    "La page PremierBet est ouverte mais Aviator ne démarre pas; reconnectez la session PremierBet."
+                    if authentication_required
+                    else "Le relais ne reçoit plus de nouvelle manche; vérifiez la session Aviator."
                     if is_stale
                     else
                     "Le relais local envoie les manches réelles vers Render."
@@ -267,6 +285,7 @@ def source_probe_snapshot(
         stage_messages = {
             "extension-started": "Extension chargée; attente de la page PremierBet.",
             "premierbet-page": "Page PremierBet détectée; attente de l'iframe Aviator.",
+            "provider-missing": "Aviator ne démarre pas; reconnectez la session PremierBet.",
             "provider-frame": "Iframe Aviator détectée; attente de l'historique des manches.",
             "history-detected": "Historique Aviator détecté; attente de la prochaine manche.",
         }
